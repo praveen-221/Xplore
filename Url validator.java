@@ -1,4 +1,4 @@
-import java.util.regex.*;
+oimport java.util.regex.*;
 import java.util.Scanner;
 
 public class DBUrlValidator {
@@ -154,4 +154,38 @@ ORDER BY rd.ObjectName;
 
 ----------
 
+// print all the db objects accesssed like views, synonyms, tables etc...
+WITH RecursiveDependencies AS (
+    -- Step 1: Get Direct Dependencies (Tables, Views, Functions, Synonyms)
+    SELECT 
+        dep.referenced_id AS ObjectID, 
+        obj.name AS ObjectName,
+        obj.type_desc AS ObjectType,
+        syn.base_object_name AS SynonymBaseObject
+    FROM sys.sql_expression_dependencies dep
+    INNER JOIN sys.objects obj ON dep.referenced_id = obj.object_id
+    LEFT JOIN sys.synonyms syn ON obj.name = syn.name -- Resolving synonyms
+    WHERE dep.referencing_id = OBJECT_ID('YourViewOrProcedureName') -- Replace with actual view/procedure name
 
+    UNION ALL
+
+    -- Step 2: Recursively Traverse Views and Synonyms That Are Views
+    SELECT 
+        dep.referenced_id,
+        obj.name,
+        obj.type_desc,
+        syn.base_object_name
+    FROM sys.sql_expression_dependencies dep
+    INNER JOIN sys.objects obj ON dep.referenced_id = obj.object_id
+    LEFT JOIN sys.synonyms syn ON obj.name = syn.name
+    INNER JOIN RecursiveDependencies rd ON dep.referencing_id = rd.ObjectID
+    WHERE obj.type_desc IN ('VIEW', 'SYNONYM') -- Keep resolving views and synonyms
+)
+-- Step 3: Select User Tables, Functions, Views, and Synonyms
+SELECT DISTINCT 
+    rd.ObjectName, 
+    rd.ObjectType,
+    COALESCE(rd.SynonymBaseObject, 'Direct Reference') AS ResolvedBaseObject
+FROM RecursiveDependencies rd
+WHERE rd.ObjectType IN ('USER_TABLE', 'SQL_SCALAR_FUNCTION', 'SQL_TABLE_VALUED_FUNCTION', 'VIEW', 'SYNONYM')
+ORDER BY rd.ObjectType, rd.ObjectName;

@@ -247,3 +247,86 @@ SELECT DISTINCT
 FROM RecursiveDependencies rd
 WHERE rd.ObjectType IN ('USER_TABLE', 'SQL_SCALAR_FUNCTION', 'SQL_TABLE_VALUED_FUNCTION', 'VIEW', 'SYNONYM')
 ORDER BY rd.DatabaseName, rd.SchemaName, rd.ObjectName;
+
+----------
+// without recursion 
+DECLARE @ViewOrProcedureName NVARCHAR(255) = 'YourViewOrProcedureName'; -- Replace with your object name
+DECLARE @SQL NVARCHAR(MAX);
+DECLARE @ObjectID INT;
+
+-- Table to Store Dependencies
+IF OBJECT_ID('tempdb..#Dependencies') IS NOT NULL DROP TABLE #Dependencies;
+CREATE TABLE #Dependencies (
+    ObjectID INT,
+    ObjectName NVARCHAR(255),
+    ObjectType NVARCHAR(255),
+    SynonymBaseObject NVARCHAR(4000),
+    DatabaseName NVARCHAR(255),
+    SchemaName NVARCHAR(255),
+    Processed BIT DEFAULT 0
+);
+
+-- Step 1: Insert Direct Dependencies
+INSERT INTO #Dependencies (ObjectID, ObjectName, ObjectType, SynonymBaseObject, DatabaseName, SchemaName)
+SELECT 
+    dep.referenced_id, 
+    obj.name,
+    obj.type_desc,
+    syn.base_object_name,
+    CASE 
+        WHEN syn.base_object_name LIKE '%.%' THEN PARSENAME(syn.base_object_name, 3) 
+        ELSE DB_NAME() 
+    END AS DatabaseName, 
+    CASE 
+        WHEN syn.base_object_name LIKE '%.%' THEN PARSENAME(syn.base_object_name, 2) 
+        ELSE SCHEMA_NAME(obj.schema_id) 
+    END AS SchemaName
+FROM sys.sql_expression_dependencies dep
+INNER JOIN sys.objects obj ON dep.referenced_id = obj.object_id
+LEFT JOIN sys.synonyms syn ON obj.name = syn.name
+WHERE dep.referencing_id = OBJECT_ID(@ViewOrProcedureName);
+
+-- Step 2: Process Dependencies in a Loop Until No More Views/Synonyms to Process
+WHILE EXISTS (SELECT 1 FROM #Dependencies WHERE Processed = 0)
+BEGIN
+    -- Get Next Unprocessed Object
+    SELECT TOP 1 @ObjectID = ObjectID FROM #Dependencies WHERE Processed = 0;
+
+    -- Insert Dependencies of This Object
+    INSERT INTO #Dependencies (ObjectID, ObjectName, ObjectType, SynonymBaseObject, DatabaseName, SchemaName)
+    SELECT 
+        dep.referenced_id, 
+        obj.name,
+        obj.type_desc,
+        syn.base_object_name,
+        CASE 
+            WHEN syn.base_object_name LIKE '%.%' THEN PARSENAME(syn.base_object_name, 3) 
+            ELSE DB_NAME() 
+        END AS DatabaseName, 
+        CASE 
+            WHEN syn.base_object_name LIKE '%.%' THEN PARSENAME(syn.base_object_name, 2) 
+            ELSE SCHEMA_NAME(obj.schema_id) 
+        END AS SchemaName
+    FROM sys.sql_expression_dependencies dep
+    INNER JOIN sys.objects obj ON dep.referenced_id = obj.object_id
+    LEFT JOIN sys.synonyms syn ON obj.name = syn.name
+    WHERE dep.referencing_id = @ObjectID
+    AND NOT EXISTS (SELECT 1 FROM #Dependencies WHERE ObjectID = dep.referenced_id);
+
+    -- Mark Processed
+    UPDATE #Dependencies SET Processed = 1 WHERE ObjectID = @ObjectID;
+END
+
+-- Step 3: Return Final Results
+SELECT DISTINCT 
+    ObjectName, 
+    ObjectType,
+    COALESCE(SynonymBaseObject, 'Direct Reference') AS ResolvedBaseObject,
+    DatabaseName,
+    SchemaName
+FROM #Dependencies
+WHERE ObjectType IN ('USER_TABLE', 'SQL_SCALAR_FUNCTION', 'SQL_TABLE_VALUED_FUNCTION', 'VIEW', 'SYNONYM')
+ORDER BY DatabaseName, SchemaName, ObjectName;
+
+-- Cleanup
+DROP TABLE #Dependencies;

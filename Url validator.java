@@ -1,4 +1,6 @@
-oimport java.util.regex.*;
+// =MID(A1, FIND("]", A1, FIND("]", A1) + 1) + 2, FIND("]", A1 & "]", FIND("]", A1, FIND("]", A1) + 1) + 1) - FIND("]", A1, FIND("]", A1) + 1) - 2)
+
+import java.util.regex.*;
 import java.util.Scanner;
 
 public class DBUrlValidator {

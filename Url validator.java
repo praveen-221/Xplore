@@ -330,3 +330,73 @@ ORDER BY DatabaseName, SchemaName, ObjectName;
 
 -- Cleanup
 DROP TABLE #Dependencies;
+
+
+
+ -------
+    DECLARE @ViewOrProcedureName NVARCHAR(255) = 'YourViewOrProcedureName'; -- Replace with your object name
+DECLARE @SQL NVARCHAR(MAX);
+DECLARE @ObjectID INT, @BaseObject NVARCHAR(4000);
+
+-- Table to Store Dependencies
+IF OBJECT_ID('tempdb..#Dependencies') IS NOT NULL DROP TABLE #Dependencies;
+CREATE TABLE #Dependencies (
+    ObjectID INT NULL,
+    ObjectName NVARCHAR(255),
+    ObjectType NVARCHAR(255),
+    SynonymBaseObject NVARCHAR(4000),
+    ResolvedBaseObject NVARCHAR(4000),
+    Processed BIT DEFAULT 0
+);
+
+-- Step 1: Insert Direct Dependencies (Tables, Views, Functions, Synonyms)
+INSERT INTO #Dependencies (ObjectID, ObjectName, ObjectType, SynonymBaseObject, ResolvedBaseObject)
+SELECT 
+    dep.referenced_id, 
+    obj.name,
+    obj.type_desc,
+    syn.base_object_name AS SynonymBaseObject,
+    COALESCE(syn.base_object_name, obj.name) AS ResolvedBaseObject
+FROM sys.sql_expression_dependencies dep
+INNER JOIN sys.objects obj ON dep.referenced_id = obj.object_id
+LEFT JOIN sys.synonyms syn ON obj.name = syn.name  -- Resolving synonyms
+WHERE dep.referencing_id = OBJECT_ID(@ViewOrProcedureName);
+
+-- Step 2: Process Dependencies in a Loop Until All Base Tables Are Found
+WHILE EXISTS (SELECT 1 FROM #Dependencies WHERE Processed = 0)
+BEGIN
+    -- Get Next Unprocessed Object
+    SELECT TOP 1 @ObjectID = ObjectID, @BaseObject = SynonymBaseObject 
+    FROM #Dependencies WHERE Processed = 0;
+
+    -- If the Object is a Synonym, Find its Base Table/View
+    IF @BaseObject IS NOT NULL
+    BEGIN
+        INSERT INTO #Dependencies (ObjectID, ObjectName, ObjectType, SynonymBaseObject, ResolvedBaseObject)
+        SELECT 
+            obj.object_id,
+            obj.name,
+            obj.type_desc,
+            NULL AS SynonymBaseObject, -- It's now resolved
+            obj.name AS ResolvedBaseObject
+        FROM sys.objects obj
+        WHERE obj.name = PARSENAME(@BaseObject, 1) -- Extract only the table/view name
+        AND NOT EXISTS (SELECT 1 FROM #Dependencies WHERE ObjectName = obj.name);
+    END
+
+    -- Mark Processed
+    UPDATE #Dependencies SET Processed = 1 WHERE ObjectID = @ObjectID OR SynonymBaseObject = @BaseObject;
+END
+
+-- Step 3: Return Final Results (Base Tables, Views, Functions, Synonyms)
+SELECT DISTINCT 
+    ObjectName, 
+    ObjectType,
+    COALESCE(SynonymBaseObject, 'Direct Reference') AS SynonymUsed,
+    ResolvedBaseObject AS FinalBaseObject
+FROM #Dependencies
+WHERE ObjectType IN ('USER_TABLE', 'SQL_SCALAR_FUNCTION', 'SQL_TABLE_VALUED_FUNCTION', 'VIEW', 'SYNONYM')
+ORDER BY ObjectType, ObjectName;
+
+-- Cleanup
+DROP TABLE #Dependencies;

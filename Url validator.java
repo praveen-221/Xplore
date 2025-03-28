@@ -484,3 +484,78 @@ ORDER BY ObjectType, ObjectName;
 
 -- Cleanup
 DROP TABLE #Dependencies;
+
+--------------------
+DECLARE @ViewOrProcedureName NVARCHAR(255) = 'YourViewOrProcedureName'; -- Replace with your object name
+DECLARE @SQL NVARCHAR(MAX);
+DECLARE @ObjectID INT, @BaseObject NVARCHAR(4000);
+
+-- Temporary Table to Store Dependencies
+IF OBJECT_ID('tempdb..#Dependencies') IS NOT NULL DROP TABLE #Dependencies;
+CREATE TABLE #Dependencies (
+    ObjectID INT NULL,
+    ObjectName NVARCHAR(255),
+    ObjectType NVARCHAR(255),
+    SynonymBaseObject NVARCHAR(4000),
+    ResolvedBaseObject NVARCHAR(4000),
+    Processed BIT DEFAULT 0
+);
+
+-- Step 1: Insert Direct Dependencies (Tables, Views, Functions, Synonyms)
+INSERT INTO #Dependencies (ObjectID, ObjectName, ObjectType, SynonymBaseObject, ResolvedBaseObject)
+SELECT 
+    dep.referenced_id, 
+    obj.name,
+    obj.type_desc,
+    syn.base_object_name AS SynonymBaseObject,
+    COALESCE(syn.base_object_name, obj.name) AS ResolvedBaseObject
+FROM sys.sql_expression_dependencies dep
+INNER JOIN sys.objects obj ON dep.referenced_id = obj.object_id
+LEFT JOIN sys.synonyms syn ON obj.name = syn.name  -- Resolving synonyms
+WHERE dep.referencing_id = OBJECT_ID(@ViewOrProcedureName); -- Replace with your view or stored procedure
+
+-- Step 2: Recursive CTE to resolve dependencies of views, synonyms, etc.
+WITH RecursiveDependencies AS (
+    -- Base case: Starting with the initial view or stored procedure
+    SELECT 
+        dep.referenced_id AS ObjectID,
+        obj.name AS ObjectName,
+        obj.type_desc AS ObjectType,
+        syn.base_object_name AS SynonymBaseObject,
+        COALESCE(syn.base_object_name, obj.name) AS ResolvedBaseObject,
+        1 AS Depth
+    FROM sys.sql_expression_dependencies dep
+    INNER JOIN sys.objects obj ON dep.referenced_id = obj.object_id
+    LEFT JOIN sys.synonyms syn ON obj.name = syn.name  -- Resolving synonyms
+    WHERE dep.referencing_id = OBJECT_ID(@ViewOrProcedureName)
+
+    UNION ALL
+
+    -- Recursive case: Resolving further dependencies (views, synonyms, etc.)
+    SELECT 
+        dep.referenced_id AS ObjectID,
+        obj.name AS ObjectName,
+        obj.type_desc AS ObjectType,
+        syn.base_object_name AS SynonymBaseObject,
+        COALESCE(syn.base_object_name, obj.name) AS ResolvedBaseObject,
+        r.Depth + 1 AS Depth
+    FROM sys.sql_expression_dependencies dep
+    INNER JOIN sys.objects obj ON dep.referenced_id = obj.object_id
+    INNER JOIN sys.synonyms syn ON obj.name = syn.name  -- Resolving synonyms
+    JOIN RecursiveDependencies r ON r.ObjectID = dep.referencing_id
+    WHERE dep.referencing_id != dep.referenced_id  -- Prevent cyclic references
+)
+
+-- Step 3: Return Final Results (Base Tables, Views, Functions, Synonyms)
+SELECT DISTINCT 
+    ObjectName, 
+    ObjectType,
+    COALESCE(SynonymBaseObject, 'Direct Reference') AS SynonymUsed,
+    ResolvedBaseObject AS FinalBaseObject,
+    Depth
+FROM RecursiveDependencies
+WHERE ObjectType IN ('USER_TABLE', 'VIEW', 'SQL_SCALAR_FUNCTION', 'SQL_TABLE_VALUED_FUNCTION', 'SYNONYM')
+ORDER BY Depth, ObjectType, ObjectName;
+
+-- Cleanup
+DROP TABLE IF EXISTS #Dependencies;

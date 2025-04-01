@@ -686,3 +686,192 @@ WITH Constraints AS (
 SELECT *
 FROM Constraints
 ORDER BY ReferencingTable, ConstraintType;
+
+-----------------------
+-- Declare the entity name to search
+DECLARE @EntityName NVARCHAR(128) = 'YourEntityName'; -- Replace with the name of the table or view you're interested in
+
+WITH Constraints AS (
+    -- Foreign Key Constraints
+    SELECT 
+        fk.name AS ConstraintName,
+        'FOREIGN KEY' AS ConstraintType,
+        OBJECT_NAME(fk.parent_object_id) AS ReferencingTable,
+        COL_NAME(fkc.parent_object_id, fkc.parent_column_id) AS ReferencingColumn,
+        OBJECT_NAME(fk.referenced_object_id) AS ReferencedTable,
+        COL_NAME(fkc.referenced_object_id, fkc.referenced_column_id) AS ReferencedColumn,
+        fk.delete_referential_action_desc AS DeleteAction,
+        fk.update_referential_action_desc AS UpdateAction
+    FROM sys.foreign_keys fk
+    JOIN sys.foreign_key_columns fkc 
+        ON fk.object_id = fkc.constraint_object_id
+
+    UNION ALL
+
+    -- Primary Key Constraints
+    SELECT 
+        kc.name AS ConstraintName,
+        'PRIMARY KEY' AS ConstraintType,
+        t.name AS ReferencingTable,
+        COL_NAME(kc.parent_object_id, kcu.column_id) AS ReferencingColumn,
+        NULL AS ReferencedTable,
+        NULL AS ReferencedColumn,
+        NULL AS DeleteAction,
+        NULL AS UpdateAction
+    FROM sys.key_constraints kc
+    JOIN sys.tables t 
+        ON kc.parent_object_id = t.object_id
+    JOIN sys.index_columns kcu 
+        ON kc.parent_object_id = kcu.object_id 
+        AND kc.unique_index_id = kcu.index_id
+    WHERE kc.type = 'PK'
+
+    UNION ALL
+
+    -- Unique Constraints
+    SELECT 
+        kc.name AS ConstraintName,
+        'UNIQUE CONSTRAINT' AS ConstraintType,
+        t.name AS ReferencingTable,
+        COL_NAME(kc.parent_object_id, kcu.column_id) AS ReferencingColumn,
+        NULL AS ReferencedTable,
+        NULL AS ReferencedColumn,
+        NULL AS DeleteAction,
+        NULL AS UpdateAction
+    FROM sys.key_constraints kc
+    JOIN sys.tables t 
+        ON kc.parent_object_id = t.object_id
+    JOIN sys.index_columns kcu 
+        ON kc.parent_object_id = kcu.object_id 
+        AND kc.unique_index_id = kcu.index_id
+    WHERE kc.type = 'UQ'
+
+    UNION ALL
+
+    -- Check Constraints
+    SELECT 
+        cc.name AS ConstraintName,
+        'CHECK CONSTRAINT' AS ConstraintType,
+        t.name AS ReferencingTable,
+        COL_NAME(cc.parent_object_id, c.column_id) AS ReferencingColumn,
+        NULL AS ReferencedTable,
+        NULL AS ReferencedColumn,
+        NULL AS DeleteAction,
+        NULL AS UpdateAction
+    FROM sys.check_constraints cc
+    JOIN sys.tables t 
+        ON cc.parent_object_id = t.object_id
+    JOIN sys.columns c 
+        ON cc.parent_object_id = c.object_id 
+        AND cc.parent_column_id = c.column_id
+
+    UNION ALL
+
+    -- Default Constraints
+    SELECT 
+        dc.name AS ConstraintName,
+        'DEFAULT CONSTRAINT' AS ConstraintType,
+        t.name AS ReferencingTable,
+        COL_NAME(dc.parent_object_id, dc.parent_column_id) AS ReferencingColumn,
+        NULL AS ReferencedTable,
+        NULL AS ReferencedColumn,
+        NULL AS DeleteAction,
+        NULL AS UpdateAction
+    FROM sys.default_constraints dc
+    JOIN sys.tables t 
+        ON dc.parent_object_id = t.object_id
+    JOIN sys.columns c 
+        ON dc.parent_object_id = c.object_id
+        AND dc.parent_column_id = c.column_id
+
+    UNION ALL
+
+    -- Composite Key Constraints (Primary or Unique on Multiple Columns)
+    SELECT 
+        kc.name AS ConstraintName,
+        'COMPOSITE KEY' AS ConstraintType,
+        t.name AS ReferencingTable,
+        COL_NAME(kc.parent_object_id, kcu.column_id) AS ReferencingColumn,
+        NULL AS ReferencedTable,
+        NULL AS ReferencedColumn,
+        NULL AS DeleteAction,
+        NULL AS UpdateAction
+    FROM sys.key_constraints kc
+    JOIN sys.tables t 
+        ON kc.parent_object_id = t.object_id
+    JOIN sys.index_columns kcu 
+        ON kc.parent_object_id = kcu.object_id 
+        AND kc.unique_index_id = kcu.index_id
+    WHERE kc.type IN ('PK', 'UQ')
+
+    UNION ALL
+
+    -- Spatial Index Constraints
+    SELECT 
+        idx.name AS ConstraintName,
+        'SPATIAL INDEX' AS ConstraintType,
+        t.name AS ReferencingTable,
+        NULL AS ReferencingColumn,
+        NULL AS ReferencedTable,
+        NULL AS ReferencedColumn,
+        NULL AS DeleteAction,
+        NULL AS UpdateAction
+    FROM sys.indexes idx
+    JOIN sys.tables t 
+        ON idx.object_id = t.object_id
+    WHERE idx.type_desc = 'SPATIAL'
+
+    UNION ALL
+
+    -- XML Index Constraints
+    SELECT 
+        idx.name AS ConstraintName,
+        'XML INDEX' AS ConstraintType,
+        t.name AS ReferencingTable,
+        NULL AS ReferencingColumn,
+        NULL AS ReferencedTable,
+        NULL AS ReferencedColumn,
+        NULL AS DeleteAction,
+        NULL AS UpdateAction
+    FROM sys.indexes idx
+    JOIN sys.tables t 
+        ON idx.object_id = t.object_id
+    WHERE idx.type_desc = 'XML'
+
+    UNION ALL
+
+    -- Full-text Index Constraints
+    SELECT 
+        idx.name AS ConstraintName,
+        'FULLTEXT INDEX' AS ConstraintType,
+        t.name AS ReferencingTable,
+        NULL AS ReferencingColumn,
+        NULL AS ReferencedTable,
+        NULL AS ReferencedColumn,
+        NULL AS DeleteAction,
+        NULL AS UpdateAction
+    FROM sys.indexes idx
+    JOIN sys.tables t 
+        ON idx.object_id = t.object_id
+    WHERE idx.type_desc = 'FULLTEXT'
+)
+
+-- Final query to get all the constraints with additional entity information
+SELECT 
+    c.ConstraintName,
+    c.ConstraintType,
+    c.ReferencingTable,
+    c.ReferencingColumn,
+    c.ReferencedTable,
+    c.ReferencedColumn,
+    c.DeleteAction,
+    c.UpdateAction,
+    t.is_ms_shipped,         -- Identify if the entity is a system (box) entity
+    t.is_locked,             -- Check if the entity is locked for editing
+    t.create_date,           -- Creation date of the entity
+    t.modify_date            -- Last modified date of the entity
+FROM Constraints c
+JOIN sys.tables t 
+    ON c.ReferencingTable = t.name
+WHERE c.ReferencingTable = @EntityName OR c.ReferencedTable = @EntityName
+ORDER BY c.ReferencingTable, c.ConstraintType;

@@ -561,3 +561,32 @@ ORDER BY Depth, ObjectType, ObjectName;
 
 -- Cleanup
 DROP TABLE IF EXISTS #Dependencies;
+
+------------------
+-- Declare the entity (table or view) name
+DECLARE @EntityName NVARCHAR(128) = 'YourEntityName'; -- Replace 'YourEntityName' with the actual entity name
+
+-- Query to find dependencies and relationships of the entity
+SELECT 
+    referencing_entity.name AS ReferencingEntity,
+    referenced_entity.name AS ReferencedEntity,
+    fk.name AS FK_ConstraintName,
+    fk.type_desc AS FK_Type,
+    fk.parent_object_id AS ParentObjectId,
+    fk.referenced_object_id AS ReferencedObjectId,
+    fk.is_disabled AS IsFK_Disabled,
+    fk.is_enabled AS IsFK_Enabled,
+    fk.delete_referential_action_desc AS OnDeleteAction,
+    fk.update_referential_action_desc AS OnUpdateAction
+FROM 
+    sys.foreign_keys AS fk
+JOIN 
+    sys.tables AS referencing_entity
+    ON fk.parent_object_id = referencing_entity.object_id
+JOIN 
+    sys.tables AS referenced_entity
+    ON fk.referenced_object_id = referenced_entity.object_id
+WHERE 
+    referencing_entity.name = @EntityName OR referenced_entity.name = @EntityName
+ORDER BY 
+    ReferencingEntity, ReferencedEntity;

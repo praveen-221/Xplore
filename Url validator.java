@@ -875,3 +875,47 @@ JOIN sys.tables t
     ON c.ReferencingTable = t.name
 WHERE c.ReferencingTable = @EntityName OR c.ReferencedTable = @EntityName
 ORDER BY c.ReferencingTable, c.ConstraintType;
+
+------------------
+-- Declare the view name for which we want to find dependencies
+DECLARE @ViewName NVARCHAR(128) = 'YourViewName';  -- Replace with your view name
+
+-- Find the dependencies for the given view using system views with level information
+WITH Dependencies AS (
+    -- Base query to find the direct dependencies of the view
+    SELECT 
+        OBJECT_NAME(d.referencing_id) AS ReferencingEntity,
+        o.type_desc AS ObjectType,
+        OBJECT_NAME(d.referenced_id) AS ReferencedEntity,
+        ro.type_desc AS ReferencedObjectType,
+        1 AS Level  -- Direct dependency level is 1
+    FROM sys.sql_expression_dependencies d
+    JOIN sys.objects o ON d.referencing_id = o.object_id  -- Join to find referencing object type
+    JOIN sys.objects ro ON d.referenced_id = ro.object_id -- Join to find referenced object type
+    WHERE o.name = @ViewName  -- Filtering for the specific view name
+
+    UNION ALL
+
+    -- Recursively get dependencies if the referenced object is also a view or any other dependent entity
+    SELECT 
+        OBJECT_NAME(d.referencing_id) AS ReferencingEntity,
+        o.type_desc AS ObjectType,
+        OBJECT_NAME(d.referenced_id) AS ReferencedEntity,
+        ro.type_desc AS ReferencedObjectType,
+        d.Level + 1 AS Level  -- Increment the level for each recursive iteration
+    FROM sys.sql_expression_dependencies d
+    JOIN sys.objects o ON d.referencing_id = o.object_id
+    JOIN sys.objects ro ON d.referenced_id = ro.object_id
+    JOIN Dependencies dep ON dep.ReferencedEntity = OBJECT_NAME(d.referencing_id)  -- Join to recursive part
+    WHERE ro.type_desc IN ('VIEW', 'SQL_SCALAR_FUNCTION', 'SQL_TABLE_VALUED_FUNCTION', 'USER_TABLE')  -- This includes views, functions, and tables
+)
+
+-- Select the unique dependencies and include the level column
+SELECT DISTINCT
+    ReferencingEntity,
+    ObjectType,
+    ReferencedEntity,
+    ReferencedObjectType,
+    Level  -- Include the dependency level
+FROM Dependencies
+ORDER BY Level, ReferencingEntity, ReferencedEntity;

@@ -919,3 +919,58 @@ SELECT DISTINCT
     Level  -- Include the dependency level
 FROM Dependencies
 ORDER BY Level, ReferencingEntity, ReferencedEntity;
+
+
+--------------
+// view dependencies recursive 
+DECLARE @EntityName NVARCHAR(128) = 'YourViewOrProcedure';  -- Replace with your entity
+
+-- Recursive CTE to find dependencies, including synonyms resolution
+WITH Dependencies AS (
+    -- Base query: Direct dependencies of the given entity (view/procedure)
+    SELECT 
+        OBJECT_NAME(d.referencing_id) AS ReferencingEntity,
+        o.type_desc AS ObjectType,
+        -- If referenced entity is a synonym, resolve its base object name
+        COALESCE(
+            PARSENAME(s.base_object_name, 1),  -- Extract actual table/view name from synonym
+            OBJECT_NAME(d.referenced_id)      -- Use normal referenced entity name if not a synonym
+        ) AS ReferencedEntity,
+        -- Determine the type of the referenced entity
+        COALESCE(ro.type_desc, 'SYNONYM') AS ReferencedObjectType,
+        1 AS Level  -- Direct dependencies have level 1
+    FROM sys.sql_expression_dependencies d
+    JOIN sys.objects o ON d.referencing_id = o.object_id  -- Get referencing object details
+    LEFT JOIN sys.objects ro ON d.referenced_id = ro.object_id  -- Get referenced object details
+    LEFT JOIN sys.synonyms s ON ro.object_id = s.object_id  -- Check if referenced object is a synonym
+    WHERE o.name = @EntityName
+
+    UNION ALL
+
+    -- Recursive query to find indirect dependencies (including synonyms resolution)
+    SELECT 
+        OBJECT_NAME(d.referencing_id) AS ReferencingEntity,
+        o.type_desc AS ObjectType,
+        COALESCE(
+            PARSENAME(s.base_object_name, 1),  -- Extract actual table/view name from synonym
+            OBJECT_NAME(d.referenced_id)      -- Use normal referenced entity name if not a synonym
+        ) AS ReferencedEntity,
+        COALESCE(ro.type_desc, 'SYNONYM') AS ReferencedObjectType,
+        dep.Level + 1 AS Level  -- Increment the recursion level
+    FROM sys.sql_expression_dependencies d
+    JOIN sys.objects o ON d.referencing_id = o.object_id
+    LEFT JOIN sys.objects ro ON d.referenced_id = ro.object_id
+    LEFT JOIN sys.synonyms s ON ro.object_id = s.object_id
+    JOIN Dependencies dep ON dep.ReferencedEntity = OBJECT_NAME(d.referencing_id)  -- Recursive join
+    WHERE ro.type_desc IN ('VIEW', 'SQL_SCALAR_FUNCTION', 'SQL_TABLE_VALUED_FUNCTION', 'USER_TABLE', 'SYNONYM')
+)
+
+-- Final output: Display dependencies with resolved synonym targets
+SELECT DISTINCT
+    ReferencingEntity,
+    ObjectType,
+    ReferencedEntity,
+    ReferencedObjectType,
+    Level  -- Indicates depth of dependency
+FROM Dependencies
+ORDER BY Level, ReferencingEntity, ReferencedEntity;

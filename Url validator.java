@@ -974,3 +974,34 @@ SELECT DISTINCT
     Level  -- Indicates depth of dependency
 FROM Dependencies
 ORDER BY Level, ReferencingEntity, ReferencedEntity;
+
+-------------------------
+// filtered fk constraints 
+-- Define your list1 and list2 as table variables or use temp tables
+DECLARE @list1 TABLE (TableName SYSNAME);
+DECLARE @list2 TABLE (TableName SYSNAME);
+
+-- Sample data
+INSERT INTO @list1 (TableName) VALUES ('Orders'), ('Invoices');
+INSERT INTO @list2 (TableName) VALUES ('Customers'), ('Products');
+
+-- Query to get FK relationships from list1 tables to list2 tables
+SELECT
+    fk.name AS ForeignKeyName,
+    OBJECT_SCHEMA_NAME(fk.parent_object_id) AS SourceSchema,
+    src.name AS SourceTable,
+    src_col.name AS SourceColumn,
+    OBJECT_SCHEMA_NAME(fk.referenced_object_id) AS TargetSchema,
+    tgt.name AS TargetTable,
+    tgt_col.name AS TargetColumn
+FROM sys.foreign_keys AS fk
+JOIN sys.foreign_key_columns AS fkc ON fk.object_id = fkc.constraint_object_id
+JOIN sys.tables AS src ON fkc.parent_object_id = src.object_id
+JOIN sys.columns AS src_col ON fkc.parent_object_id = src_col.object_id AND fkc.parent_column_id = src_col.column_id
+JOIN sys.tables AS tgt ON fkc.referenced_object_id = tgt.object_id
+JOIN sys.columns AS tgt_col ON fkc.referenced_object_id = tgt_col.object_id AND fkc.referenced_column_id = tgt_col.column_id
+WHERE src.name IN (SELECT TableName FROM @list1)
+  AND tgt.name IN (SELECT TableName FROM @list2)
+ORDER BY SourceTable, TargetTable, ForeignKeyName;
+
+---------------

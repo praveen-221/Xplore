@@ -1020,3 +1020,20 @@ GROUP BY
 ORDER BY 
     RowCount DESC;
 ---------
+
+DECLARE @sql NVARCHAR(MAX) = '';
+
+SELECT @sql += 
+    'SELECT ''' + QUOTENAME(s.name) + '.' + QUOTENAME(t.name) + ''' AS TableName, COUNT(*) AS RowCount FROM ' + 
+    QUOTENAME(s.name) + '.' + QUOTENAME(t.name) + ' UNION ALL '
+FROM 
+    sys.tables t
+JOIN 
+    sys.schemas s ON t.schema_id = s.schema_id;
+
+-- Remove trailing UNION ALL
+SET @sql = LEFT(@sql, LEN(@sql) - 10);
+
+EXEC sp_executesql @sql;
+
+-----------

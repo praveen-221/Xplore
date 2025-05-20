@@ -1,0 +1,85 @@
+# --------------------------------------------
+# 1. CONFIGURATION
+# --------------------------------------------
+$clientId = "<your-client-id>"
+$clientSecret = "<your-client-secret>"
+$tenantId = "<your-tenant-id>"
+$crmUrl = "https://<yourorg>.crm.dynamics.com"
+$outputPath = "C:\Dataverse_Metadata_SQLCompatible.csv"
+
+# --------------------------------------------
+# 2. Get OAuth Token
+# --------------------------------------------
+$body = @{
+    grant_type    = "client_credentials"
+    client_id     = $clientId
+    client_secret = $clientSecret
+    resource      = $crmUrl
+}
+$tokenResponse = Invoke-RestMethod -Method Post -Uri "https://login.microsoftonline.com/$tenantId/oauth2/token" -Body $body
+$headers = @{ Authorization = "Bearer $($tokenResponse.access_token)" }
+
+# --------------------------------------------
+# 3. Get All Entities (Tables)
+# --------------------------------------------
+$entityUrl = "$crmUrl/api/data/v9.2/EntityDefinitions?$select=LogicalName"
+$entities = Invoke-RestMethod -Method Get -Uri $entityUrl -Headers $headers
+
+# --------------------------------------------
+# 4. Prepare Mapping for Dataverse -> SQL Data Types
+# --------------------------------------------
+$typeMapping = @{
+    "StringType"             = "nvarchar"
+    "MemoType"               = "nvarchar(max)"
+    "IntegerType"            = "int"
+    "BigIntType"             = "bigint"
+    "DecimalType"            = "decimal"
+    "DoubleType"             = "float"
+    "MoneyType"              = "money"
+    "BooleanType"            = "bit"
+    "DateTimeType"           = "datetime"
+    "UniqueidentifierType"   = "uniqueidentifier"
+    "PicklistType"           = "int"
+    "LookupType"             = "uniqueidentifier"
+    "CustomerType"           = "uniqueidentifier"
+    "OwnerType"              = "uniqueidentifier"
+    "StateType"              = "int"
+    "StatusType"             = "int"
+}
+
+# --------------------------------------------
+# 5. Fetch Attributes for Each Entity
+# --------------------------------------------
+$results = @()
+
+foreach ($entity in $entities.value) {
+    $tableName = $entity.LogicalName
+    Write-Host "Fetching attributes for table: $tableName"
+
+    $attrUrl = "$crmUrl/api/data/v9.2/EntityDefinitions(LogicalName='$tableName')/Attributes?$select=LogicalName,AttributeTypeName,MaxLength,Precision"
+    try {
+        $attributes = Invoke-RestMethod -Method Get -Uri $attrUrl -Headers $headers
+        foreach ($attr in $attributes.value) {
+            $attrName = $attr.LogicalName
+            $typeName = $attr.AttributeTypeName.Value
+            $sqlType = $typeMapping[$typeName] 
+            if (-not $sqlType) { $sqlType = $typeName } # fallback if unmapped
+
+            $results += [pscustomobject]@{
+                TableName  = $tableName
+                ColumnName = $attrName
+                DataType   = $sqlType
+                Size       = $attr.MaxLength
+                Precision  = $attr.Precision
+            }
+        }
+    } catch {
+        Write-Warning "Failed to fetch attributes for $tableName"
+    }
+}
+
+# --------------------------------------------
+# 6. Export to CSV
+# --------------------------------------------
+$results | Export-Csv -Path $outputPath -NoTypeInformation -Encoding UTF8
+Write-Host "Metadata exported to $outputPath"

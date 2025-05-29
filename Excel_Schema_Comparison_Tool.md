@@ -1,3 +1,5 @@
+=IF(SUMPRODUCT(--(LOWER(Sheet2!A:A)=LOWER(A2))*(LOWER(Sheet2!B:B)=LOWER(B2)))=0, "Missing in Sheet2", "")
+
 
 # Excel Schema Comparison Tool
 
